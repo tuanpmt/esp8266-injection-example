@@ -12,14 +12,19 @@ BUILD_BASE	= build
 FW_BASE		= firmware
 
 # Base directory for the compiler
-XTENSA_TOOLS_ROOT ?= /opt/Espressif/crosstool-NG/builds/xtensa-lx106-elf/bin
+XTENSA_TOOLS_ROOT ?= 
 
 # base directory of the ESP8266 SDK package, absolute
 SDK_BASE	?= $(CURDIR)/esp_iot_sdk_v1.3.0
 
 #Esptool.py path and port
-ESPTOOL		?= esptool.py
-ESPPORT		?= /dev/ttyUSB0
+ESPTOOL		?= /tools/esp8266/esptool/esptool.py
+ESPPORT		?= /dev/tty.SLAB_USBtoUART
+#ESPPORT		?= /dev/tty.wchusbserial1410
+#ESPDELAY indicates seconds to wait between flashing the two binary images
+ESPDELAY	?= 3
+#ESPBAUD		?= 115200
+ESPBAUD		?= 460800
 
 # name for the target project
 TARGET		= app
@@ -53,9 +58,9 @@ FW_FILE_2	= 0x40000
 FW_FILE_2_ARGS	= -es .irom0.text $@ -ec
 
 # select which tools to use as compiler, librarian and linker
-CC		:= $(XTENSA_TOOLS_ROOT)/xtensa-lx106-elf-gcc
-AR		:= $(XTENSA_TOOLS_ROOT)/xtensa-lx106-elf-ar
-LD		:= $(XTENSA_TOOLS_ROOT)/xtensa-lx106-elf-gcc
+CC		:= $(XTENSA_TOOLS_ROOT)xtensa-lx106-elf-gcc
+AR		:= $(XTENSA_TOOLS_ROOT)xtensa-lx106-elf-ar
+LD		:= $(XTENSA_TOOLS_ROOT)xtensa-lx106-elf-gcc
 
 
 
@@ -103,15 +108,13 @@ endef
 
 .PHONY: all checkdirs flash clean
 
-all: checkdirs $(TARGET_OUT) $(FW_FILE_1) $(FW_FILE_2)
+all: checkdirs $(TARGET_OUT) hexout
 
-$(FW_FILE_1): $(TARGET_OUT)
+hexout: $(TARGET_OUT)
 	$(vecho) "FW $@"
-	$(Q) $(FW_TOOL) -eo $(TARGET_OUT) $(FW_FILE_1_ARGS)
+	$(Q) $(ESPTOOL) elf2image $< -o firmware/
+	
 
-$(FW_FILE_2): $(TARGET_OUT)
-	$(vecho) "FW $@"
-	$(Q) $(FW_TOOL) -eo $(TARGET_OUT) $(FW_FILE_2_ARGS)
 
 $(TARGET_OUT): $(APP_AR)
 	$(vecho) "LD $@"
@@ -129,9 +132,9 @@ $(BUILD_DIR):
 firmware:
 	$(Q) mkdir -p $@
 
-flash: firmware/0x00000.bin firmware/0x40000.bin
-	-$(ESPTOOL) --port $(ESPPORT) write_flash 0x00000 firmware/0x00000.bin 0x40000 firmware/0x40000.bin
-
+flash:
+	$(ESPTOOL) --port $(ESPPORT)  --baud $(ESPBAUD) write_flash 0x00000 firmware/0x00000.bin 0x40000 firmware/0x40000.bin
+	screen $(ESPPORT) 115200
 clean:
 	$(Q) rm -f $(APP_AR)
 	$(Q) rm -f $(TARGET_OUT)

